@@ -516,7 +516,8 @@ if __name__ == "__main__":
     blob_name = "categorias_tenerife.json"
     output_file_embbedings = "categorias_embeddings.json"
     
-    #scrape_categories()
+    # Ejecutar el proceso completo
+    scrape_categories()
     generate_embeddings(output_file)
     upload_to_blob_storage(output_file_embbedings, container_name, blob_name);    
     save_to_table_storage(output_file_embbedings, "ActividadesTenerifeCopilot");
