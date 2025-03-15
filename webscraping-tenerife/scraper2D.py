@@ -6,14 +6,24 @@ import re
 from playwright.sync_api import sync_playwright
 from urllib.parse import urljoin
 import requests
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import BlobServiceClient
 from azure.data.tables import TableServiceClient
 from azure.core.exceptions import ResourceExistsError
+from dotenv import load_dotenv
+
+# Cargar las variables de entorno desde el archivo .env
+load_dotenv()
 
 # Configuración Azure AI Foundry
-AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT", "https://ai-semantic-enrichment630206263709.openai.azure.com/")
-AZURE_FOUNDRY_API_KEY = os.getenv("AZURE_FOUNDRY_API_KEY", "DXyRUF4LP3xS0wgMoCFUJirTsGhdTTFMFUtvb323rM48zTRWNRIMJQQJ99BCACfhMk5XJ3w3AAAAACOGxvuT")
-AZURE_FOUNDRY_DEPLOYMENT_NAME = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_NAME", "gpt-4o-mini")
+AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+AZURE_FOUNDRY_API_KEY = os.getenv("AZURE_FOUNDRY_API_KEY")
+AZURE_FOUNDRY_DEPLOYMENT_NAME = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_NAME")
+AZURE_FOUNDRY_API_VERSION = os.getenv("AZURE_FOUNDRY_API_VERSION")
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_FOUNDRY_ENDPOINT_EMBBEDINGS = os.getenv("AZURE_FOUNDRY_ENDPOINT_EMBBEDINGS")
+AZURE_FOUNDRY_API_KEY_EMBEDDINGS = os.getenv("AZURE_FOUNDRY_API_KEY_EMBEDDINGS")
+AZURE_FOUNDRY_DEPLOYMENT_NAME_EMBBEDINGS=os.getenv("AZURE_FOUNDRY_DEPLOYMENT_NAME_EMBBEDINGS")
+AZURE_FOUNDRY_API_VERSION_EMBEDDINGS=os.getenv("AZURE_FOUNDRY_API_VERSION_EMBEDDINGS")
 
 # Función para enriquecer descripciones turísticas con Azure AI Foundry
 def azure_foundry_enrich_batch(descriptions):
@@ -21,8 +31,8 @@ def azure_foundry_enrich_batch(descriptions):
     Enriquece un lote de descripciones turísticas mediante Azure AI Foundry.
     Devuelve una lista de descripciones enriquecidas en el mismo orden.
     """
-    #url = f"{AZURE_FOUNDRY_ENDPOINT}openai/deployments/{AZURE_FOUNDRY_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15"
-    url= "https://ai-semantic-enrichment630206263709.openai.azure.com/openai/deployments/gpt-4o-mini/chat/completions?api-version=2024-10-21"
+    url = f"{AZURE_FOUNDRY_ENDPOINT}/openai/deployments/{AZURE_FOUNDRY_DEPLOYMENT_NAME}/chat/completions?api-version={AZURE_FOUNDRY_API_VERSION}"
+    
     headers = {
         "Content-Type": "application/json",
         "api-key": AZURE_FOUNDRY_API_KEY
@@ -215,14 +225,9 @@ def scrape_categories():
 def upload_to_blob_storage(file_path, container_name, blob_name):
 
     try:
-        # Cadena de conexión correcta (simplificada y sin duplicados)
-        connect_str = os.getenv(
-            "AZURE_STORAGE_CONNECTION_STRING", 
-            "DefaultEndpointsProtocol=https;AccountName=stcopilotaie772067053946;AccountKey=w/xJV44jErmpNclpkeapSIzbQwBtTd1htVEhRVlBBvMMCaVKMqCb52BaC1UypEctpFaQmRAoMKyf+AStAHsfkw==;EndpointSuffix=core.windows.net"
-        )
         
         # Crear el cliente de servicio blob
-        blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
         
         # Verificar si el contenedor existe, si no, crearlo
         try:
@@ -256,18 +261,17 @@ def upload_to_blob_storage(file_path, container_name, blob_name):
         print(f"Error al subir el archivo a Blob Storage: {e}")
 
 # Función para guardar los datos en Azure Table Storage
+from azure.data.tables import TableServiceClient, TableClient
+from azure.core.exceptions import ResourceExistsError
+import json
+import uuid
+
 def save_to_table_storage(json_file_path, table_name):
     try:
         print(f"Guardando datos del archivo '{json_file_path}' en Azure Table Storage...")
-        
-        # Obtener la cadena de conexión de la variable de entorno
-        connect_str = os.getenv(
-            "AZURE_STORAGE_CONNECTION_STRING", 
-            "DefaultEndpointsProtocol=https;AccountName=stcopilotaie772067053946;AccountKey=w/xJV44jErmpNclpkeapSIzbQwBtTd1htVEhRVlBBvMMCaVKMqCb52BaC1UypEctpFaQmRAoMKyf+AStAHsfkw==;EndpointSuffix=core.windows.net"
-        )
-        
+
         # Crear el cliente del servicio de tablas
-        table_service_client = TableServiceClient.from_connection_string(connect_str)
+        table_service_client = TableServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
         
         # Verificar si la tabla existe
         table_exists = False
@@ -319,21 +323,24 @@ def save_to_table_storage(json_file_path, table_name):
         added = 0
         errors = 0
         
-        # Importar uuid para generar IDs aleatorios
-        import uuid
-        
         for idx, category in enumerate(categories):
+            # Obtener campos de la categoría
+            nombre = str(category['nombre'])[:1024] if 'nombre' in category else ""
+            descripcion = str(category['descripcion'])[:8000] if 'descripcion' in category else ""
+            link = str(category.get('link', ''))[:2048]
+            descripcion_detallada = str(category.get('descripcion_detallada', ''))[:16000]
+            
+            # Verificar que todos los campos requeridos tengan valores
+            if not (nombre and descripcion and link and descripcion_detallada):
+                print(f"Registro omitido por campos vacíos: {category}")
+                errors += 1
+                continue
+            
             # Generar un ID único aleatorio usando uuid4
             unique_id = str(uuid.uuid4())
             
             # Crear un RowKey único basado en el ID generado
             row_key = unique_id
-            
-            # Obtener campos de la categoría
-            nombre = str(category['nombre'])[:1024] if 'nombre' in category else "Sin nombre"
-            descripcion = str(category['descripcion'])[:8000] if 'descripcion' in category else ""
-            link = str(category.get('link', ''))[:2048]
-            descripcion_detallada = str(category.get('descripcion_detallada', ''))[:16000]
             
             # Obtener embedding si está presente, sino dejarlo vacío
             embedding_json = ""
@@ -385,11 +392,10 @@ def generate_embeddings(json_file_path):
         categories = json.load(f)
     
     # URL del endpoint de embeddings de Azure OpenAI
-    #embedding_url = f"{AZURE_FOUNDRY_ENDPOINT}openai/deployments/text-embedding-3-small/embeddings?api-version=2023-05-15"
-    embedding_url="https://openai-copilot-studio-usa.openai.azure.com/openai/deployments/text-embedding-3-small-2/embeddings?api-version=2023-05-15"
+    embedding_url=f"{AZURE_FOUNDRY_ENDPOINT_EMBBEDINGS}/openai/deployments/{AZURE_FOUNDRY_DEPLOYMENT_NAME_EMBBEDINGS}/embeddings?api-version={AZURE_FOUNDRY_API_VERSION_EMBEDDINGS}"
     headers = {
         "Content-Type": "application/json",
-        "api-key": "39NsfCaMzHxcl80NdXWAK5qSfCZhmUAstXVAMcL3Od3mbuM77Gg6JQQJ99BCACYeBjFXJ3w3AAABACOGCWFI"
+        "api-key": AZURE_FOUNDRY_API_KEY_EMBEDDINGS
     }
     
     # Lista para almacenar los resultados
@@ -402,8 +408,11 @@ def generate_embeddings(json_file_path):
     for idx, category in enumerate(categories):
         # Combinar nombre y descripción detallada para el embedding
         nombre = category.get('nombre', 'Sin nombre')
-        descripcion_detallada = category.get('descripcion_detallada', '')
+        descripcion = category.get('descripcion', '')
+        descripcion_detallada = category.get('descripcion_detallada', '')        
+        link = category.get('link', '')
         
+
         # Texto completo para generar el embedding (combinación de nombre y descripción)
         texto = f"{nombre}. {descripcion_detallada}"
         
@@ -425,6 +434,8 @@ def generate_embeddings(json_file_path):
                 embedding_result = {
                     "id": nombre,  # Usar el nombre como identificador
                     "nombre": nombre,
+                    "descripcion": descripcion,
+                    "link": link,
                     "descripcion_detallada": descripcion_detallada,
                     "embedding": embedding
                 }
